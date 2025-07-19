@@ -1,0 +1,717 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>MyStory with Simple Story Mode</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    body {
+      background: url('https://images.unsplash.com/photo-1503264116251-35a269479413?auto=format&fit=crop&w=1950&q=80') no-repeat center center fixed;
+      background-size: cover;
+      color: white;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      -webkit-tap-highlight-color: transparent;
+    }
+    header {
+      position: fixed;
+      top: 8px;
+      width: 100%;
+      text-align: center;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #e0e0ff;
+      text-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
+      z-index: 10;
+      transition: font-size 0.3s ease;
+    }
+    .timeline {
+      flex: 1;
+      overflow-y: auto;
+      margin-top: 40px;
+      margin-bottom: 140px;
+      padding: 0 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .entry-card {
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(12px);
+      border-radius: 16px;
+      padding: 12px;
+      max-width: 100%;
+      width: 100%;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      position: relative;
+      transition: transform 0.3s ease;
+      cursor: pointer;
+    }
+    .entry-card:hover {
+      transform: translateY(-2px);
+    }
+    .entry-card.selected {
+      border: 2px solid #7d7aff;
+    }
+    .entry-card .date {
+      font-weight: 500;
+      font-size: 13px;
+      color: #e0e0ff;
+      margin-bottom: 4px;
+    }
+    .entry-card .text {
+      font-size: 13px;
+      line-height: 1.4;
+      white-space: pre-line;
+    }
+    .entry-card .media {
+      margin-top: 8px;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .entry-card .media img,
+    .entry-card .media video {
+      width: 100%;
+      border-radius: 10px;
+      max-height: 180px;
+      object-fit: contain;
+      display: block;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+    .add-story-btn {
+      position: absolute;
+      top: 8px;
+      right: 40px;
+      background: #7d7affcc;
+      border: none;
+      border-radius: 12px;
+      color: white;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 12px;
+      user-select: none;
+      transition: background 0.3s ease, transform 0.2s ease;
+    }
+    .add-story-btn:hover {
+      background: #5a59d1cc;
+      transform: scale(1.05);
+    }
+    .add-story-btn.story-added {
+      background: #4caf50cc;
+    }
+    .delete-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      border-radius: 50%;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.3s ease, transform 0.2s ease;
+    }
+    .delete-btn:hover {
+      background: rgba(255, 85, 85, 0.7);
+      transform: scale(1.1);
+    }
+    .delete-btn svg {
+      width: 16px;
+      height: 16px;
+      fill: white;
+    }
+    footer {
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(10px);
+      padding: 8px 10px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      z-index: 20;
+      box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.4);
+    }
+    #post-input {
+      width: 100%;
+      border: none;
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: rgba(255, 255, 255, 0.15);
+      color: white;
+      font-size: 13px;
+      outline: none;
+      transition: background 0.3s ease;
+    }
+    #post-input::placeholder {
+      color: #ddd;
+    }
+    #post-input:focus {
+      background: rgba(255, 255, 255, 0.25);
+    }
+    .media-preview {
+      width: 100%;
+      max-height: 100px;
+      object-fit: contain;
+      border-radius: 10px;
+      margin-bottom: 6px;
+      display: none;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+    .action-row {
+      position: fixed;
+      bottom: 70px;
+      left: 0;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+      z-index: 21;
+    }
+    .mood-button,
+    .settings-button {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #7d7aff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 20px;
+      cursor: pointer;
+      box-shadow: 0 0 6px rgba(125, 122, 255, 0.5);
+      transition: background 0.3s ease, transform 0.2s ease;
+    }
+    .mood-button:hover,
+    .settings-button:hover {
+      background: #5a59d1;
+      transform: scale(1.1);
+    }
+    .post-avatar-wrapper {
+      position: relative;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      padding: 4px;
+      background: conic-gradient(#7d7aff 0%, transparent 0%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 8px rgba(125, 122, 255, 0.5);
+      cursor: pointer;
+      transition: background 0.3s ease, transform 0.2s ease;
+    }
+    .post-avatar-wrapper:hover {
+      transform: scale(1.05);
+    }
+    .post-avatar-wrapper.xp-full {
+      background: conic-gradient(#7d7aff 100%, transparent 0%);
+      animation: glow 2s infinite ease-in-out;
+    }
+    @keyframes glow {
+      0%, 100% { box-shadow: 0 0 8px #7d7aff; }
+      50% { box-shadow: 0 0 14px #a3a0ff; }
+    }
+    .post-avatar-wrapper img {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+    .level-badge {
+      position: absolute;
+      bottom: -8px;
+      background: #222;
+      color: #fff;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 6px;
+      box-shadow: 0 0 3px rgba(0, 0, 0, 0.5);
+    }
+    #storyPlayer, #menuOverlay {
+      position: fixed;
+      inset: 0;
+      z-index: 999;
+      background: rgba(0, 0, 0, 0.9);
+      backdrop-filter: blur(10px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+    #storyPlayer .entry-card {
+      max-width: 90%;
+      margin: auto;
+      background: rgba(255, 255, 255, 0.15);
+      color: white;
+      padding: 16px;
+    }
+    #storyPlayerClose {
+      color: white;
+      background: #7d7affcc;
+      border: none;
+      padding: 8px 16px;
+      margin-top: 20px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.3s ease, transform 0.2s ease;
+    }
+    #storyPlayerClose:hover {
+      background: #5a59d1cc;
+      transform: scale(1.05);
+    }
+    #menuPanel {
+      background: rgba(30, 30, 40, 0.95);
+      border-radius: 16px 16px 0 0;
+      padding: 16px;
+      max-height: 50vh;
+      overflow-y: auto;
+      box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.8);
+      width: 100%;
+      max-width: 400px;
+    }
+    #menuPanel h3 {
+      font-size: 16px;
+      margin-bottom: 8px;
+      color: #e0e0ff;
+    }
+    #menuPanel label {
+      display: block;
+      margin: 8px 0;
+      font-size: 13px;
+    }
+    #menuPanel input[type="checkbox"] {
+      margin-right: 8px;
+    }
+    #menuPanel input[type="range"] {
+      width: 100%;
+      margin: 8px 0;
+    }
+    #menuPanel input[type="file"] {
+      margin-top: 8px;
+    }
+    /* Responsive adjustments for smaller screens */
+    @media (max-width: 480px) {
+      header {
+        font-size: 1rem;
+      }
+      .timeline {
+        margin-top: 36px;
+        margin-bottom: 130px;
+        padding: 0 8px;
+        gap: 8px;
+      }
+      .entry-card {
+        padding: 10px;
+      }
+      .entry-card .date {
+        font-size: 12px;
+      }
+      .entry-card .text {
+        font-size: 12px;
+      }
+      .entry-card .media img,
+      .entry-card .media video {
+        max-height: 160px;
+      }
+      .add-story-btn {
+        right: 36px;
+        font-size: 11px;
+        padding: 3px 6px;
+      }
+      .delete-btn {
+        width: 24px;
+        height: 24px;
+      }
+      .delete-btn svg {
+        width: 14px;
+        height: 14px;
+      }
+      footer {
+        padding: 6px 8px 10px;
+      }
+      #post-input {
+        font-size: 12px;
+        padding: 6px 8px;
+      }
+      .media-preview {
+        max-height: 80px;
+      }
+      .action-row {
+        bottom: 60px;
+        gap: 12px;
+      }
+      .mood-button,
+      .settings-button {
+        width: 36px;
+        height: 36px;
+        font-size: 18px;
+      }
+      .post-avatar-wrapper {
+        width: 56px;
+        height: 56px;
+        padding: 3px;
+      }
+      .level-badge {
+        font-size: 9px;
+        padding: 1px 5px;
+      }
+      #storyPlayer .entry-card {
+        padding: 12px;
+      }
+      #storyPlayerClose {
+        font-size: 13px;
+        padding: 6px 12px;
+      }
+      #menuPanel {
+        padding: 12px;
+      }
+      #menuPanel h3 {
+        font-size: 14px;
+      }
+      #menuPanel label {
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>MyStory</header>
+  <div class="timeline" id="timeline"></div>
+  <div class="action-row">
+    <button class="mood-button" id="mood-btn" title="Cycle Mood">😄</button>
+    <div class="post-avatar-wrapper" id="post-avatar" title="Post or Play Story Mode">
+      <img src="https://randomuser.me/api/portraits/women/44.jpg" alt="User Avatar" />
+      <div class="level-badge" id="level-badge">Lv 1</div>
+    </div>
+    <button class="settings-button" id="settingsBtn" title="Settings">⚙️</button>
+  </div>
+  <footer>
+    <img id="preview" class="media-preview" src="" alt="Media Preview" />
+    <input id="post-input" type="text" placeholder="What's on ya mind?" autocomplete="off" />
+  </footer>
+  <div id="storyPlayer" aria-hidden="true" role="dialog" aria-modal="true" tabindex="0">
+    <div id="storyContent"></div>
+    <button id="storyPlayerClose">Close Story</button>
+  </div>
+  <div id="menuOverlay" aria-hidden="true" role="dialog" aria-modal="true">
+    <div id="menuPanel" tabindex="0">
+      <h3>Settings</h3>
+      <label><input type="checkbox" id="darkModeToggle" /> Dark Mode</label>
+      <label for="fontSizeRange">Font Size</label>
+      <input type="range" id="fontSizeRange" min="12" max="24" value="13" />
+      <h3>Upload Media</h3>
+      <input type="file" id="menuMediaUpload" accept="image/*,video/*" />
+    </div>
+  </div>
+  <script>
+    let xp = 0, level = 1;
+    const avatar = document.getElementById('post-avatar');
+    const badge = document.getElementById('level-badge');
+    const input = document.getElementById('post-input');
+    const timeline = document.getElementById('timeline');
+    const moodBtn = document.getElementById('mood-btn');
+    const preview = document.getElementById('preview');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const menuOverlay = document.getElementById('menuOverlay');
+    const menuMediaUpload = document.getElementById('menuMediaUpload');
+    const storyPlayer = document.getElementById('storyPlayer');
+    const storyContent = document.getElementById('storyContent');
+    const storyPlayerClose = document.getElementById('storyPlayerClose');
+
+    let storyPosts = [];
+    let storyIndex = 0;
+    let currentStoryCards = [];
+
+    // Update avatar ring background
+    function updateAvatarRing() {
+      if (input.value.trim() || (preview.src && preview.style.display !== 'none')) {
+        avatar.style.background = 'conic-gradient(#7d7aff 100%, transparent 0%)';
+      } else {
+        avatar.style.background = 'conic-gradient(#7d7aff 0deg, transparent 0%)';
+      }
+    }
+
+    input.addEventListener('input', updateAvatarRing);
+
+    // Timeline click to toggle selection
+    timeline.addEventListener('click', e => {
+      const card = e.target.closest('.entry-card');
+      if (!card || e.target.closest('.add-story-btn') || e.target.closest('.delete-btn')) return;
+      card.classList.toggle('selected');
+    });
+
+    // Create "Add to Story" button
+    function createAddToStoryButton(card) {
+      const btn = document.createElement('button');
+      btn.textContent = 'Add to Story';
+      btn.className = 'add-story-btn';
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (btn.classList.contains('story-added')) {
+          const index = storyPosts.indexOf(card);
+          if (index > -1) storyPosts.splice(index, 1);
+          btn.classList.remove('story-added');
+          btn.textContent = 'Add to Story';
+        } else {
+          storyPosts.push(card);
+          btn.classList.add('story-added');
+          btn.textContent = 'Added';
+        }
+      });
+      return btn;
+    }
+
+    // Create delete button
+    function createDeleteButton(card) {
+      const btn = document.createElement('button');
+      btn.className = 'delete-btn';
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="white" d="M6 19V7h8V5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9h-2v10H6z"/></svg>';
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const index = storyPosts.indexOf(card);
+        if (index > -1) storyPosts.splice(index, 1);
+        card.remove();
+      });
+      return btn;
+    }
+
+    // Avatar button logic
+    avatar.addEventListener('click', () => {
+      const text = input.value.trim();
+      const hasMedia = preview.src && preview.style.display !== 'none';
+      const selectedCards = Array.from(document.querySelectorAll('.entry-card.selected'));
+
+      if (text || hasMedia) {
+        createPost(text, hasMedia ? preview.src : null);
+        input.value = '';
+        preview.src = '';
+        preview.style.display = 'none';
+        updateAvatarRing();
+      } else if (selectedCards.length > 0) {
+        playStoryMode(selectedCards);
+        selectedCards.forEach(c => c.classList.remove('selected'));
+      } else if (storyPosts.length > 0) {
+        playStoryMode(storyPosts);
+      } else {
+        alert('No posts to play in Story Mode');
+      }
+    });
+
+    // Create a new post card
+    function createPost(text, mediaSrc = null) {
+      const card = document.createElement('div');
+      card.className = 'entry-card';
+      const date = document.createElement('div');
+      date.className = 'date';
+      date.textContent = new Date().toLocaleString();
+      const textDiv = document.createElement('div');
+      textDiv.className = 'text';
+      textDiv.textContent = (moodBtn.textContent !== '😄' ? moodBtn.textContent + ' ' : '') + text;
+      card.appendChild(date);
+      if (text) card.appendChild(textDiv);
+      if (mediaSrc) {
+        const mediaWrap = document.createElement('div');
+        mediaWrap.className = 'media';
+        if (mediaSrc.match(/\.(mp4|webm|ogg)$/i)) {
+          const video = document.createElement('video');
+          video.src = mediaSrc;
+          video.controls = true;
+          mediaWrap.appendChild(video);
+        } else {
+          const img = document.createElement('img');
+          img.src = mediaSrc;
+          mediaWrap.appendChild(img);
+        }
+        card.appendChild(mediaWrap);
+      }
+      card.appendChild(createAddToStoryButton(card));
+      card.appendChild(createDeleteButton(card));
+      timeline.appendChild(card);
+      timeline.scrollTop = timeline.scrollHeight;
+      addXp();
+    }
+
+    // Play story mode with manual advancement
+    function playStoryMode(cards) {
+      if (!cards.length) return;
+      currentStoryCards = cards;
+      storyIndex = 0;
+      storyPlayer.style.display = 'flex';
+      storyPlayer.setAttribute('aria-hidden', 'false');
+      storyPlayer.focus();
+
+      function showCard(index) {
+        storyContent.innerHTML = '';
+        const clone = currentStoryCards[index].cloneNode(true);
+        clone.classList.remove('selected');
+        const btn = clone.querySelector('.add-story-btn');
+        if (btn) btn.remove();
+        const deleteBtn = clone.querySelector('.delete-btn');
+        if (deleteBtn) deleteBtn.remove();
+        storyContent.appendChild(clone);
+      }
+
+      showCard(storyIndex);
+
+      function advanceStory(e) {
+        if (e.target.closest('#storyPlayerClose')) return;
+        storyIndex++;
+        if (storyIndex >= currentStoryCards.length) {
+          closeStoryPlayer();
+        } else {
+          showCard(storyIndex);
+        }
+      }
+
+      storyPlayer.onclick = advanceStory;
+
+      function closeStoryPlayer() {
+        storyPlayer.style.display = 'none';
+        storyPlayer.setAttribute('aria-hidden', 'true');
+        storyPlayer.onclick = null;
+        currentStoryCards = [];
+        storyIndex = 0;
+      }
+    }
+
+    // Close story player
+    storyPlayerClose.addEventListener('click', () => {
+      storyPlayer.style.display = 'none';
+      storyPlayer.setAttribute('aria-hidden', 'true');
+      storyPlayer.onclick = null;
+      currentStoryCards = [];
+      storyIndex = 0;
+    });
+
+    // XP and level logic
+    function addXp() {
+      xp += 25;
+      const angle = (xp % 100) * 3.6;
+      avatar.style.background = `conic-gradient(#7d7aff ${angle}deg, transparent 0%)`;
+      if (xp >= 100) {
+        level++;
+        badge.textContent = `Lv ${level}`;
+        avatar.classList.add('xp-full');
+        setTimeout(() => avatar.classList.remove('xp-full'), 2000);
+        xp = 0;
+      }
+    }
+
+    // Mood cycling
+    moodBtn.addEventListener('click', () => {
+      const moods = ['😄', '😢', '😡', '😎', '😱', '😍'];
+      const current = moods.indexOf(moodBtn.textContent);
+      moodBtn.textContent = moods[(current + 1) % moods.length];
+    });
+
+    // Settings menu toggle
+    settingsBtn.addEventListener('click', () => {
+      menuOverlay.style.display = 'flex';
+      menuOverlay.setAttribute('aria-hidden', 'false');
+    });
+    menuOverlay.addEventListener('click', e => {
+      if (e.target === menuOverlay) {
+        menuOverlay.style.display = 'none';
+        menuOverlay.setAttribute('aria-hidden', 'true');
+      }
+    });
+
+    // Dark mode toggle
+    const darkModeToggle = document.getElementById('darkModeToggle');
+    darkModeToggle.addEventListener('change', e => {
+      if (e.target.checked) {
+        document.body.style.backgroundColor = '#121212';
+      } else {
+        document.body.style.background = '';
+      }
+    });
+
+    // Font size range
+    const fontSizeRange = document.getElementById('fontSizeRange');
+    fontSizeRange.addEventListener('input', e => {
+      document.body.style.fontSize = e.target.value + 'px';
+      document.querySelectorAll('.entry-card .text, .entry-card .date').forEach(el => {
+        el.style.fontSize = (e.target.value * 0.9) + 'px';
+      });
+    });
+
+    // Media upload preview
+    menuMediaUpload.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        preview.src = e.target.result;
+        preview.style.display = 'block';
+        updateAvatarRing();
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Example posts on load
+    window.addEventListener('DOMContentLoaded', () => {
+      createPost("Just thinking about how awesome this app is! 😊");
+      createPost("Here's a beautiful photo I took:", "https://images.unsplash.com/photo-1517816743773-6e0fd518b4a6?auto=format&fit=crop&w=800&q=80");
+      createPost("Check out this cool video!", "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm");
+    });
+  </script>
+</body>
+</html>
